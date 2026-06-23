@@ -9,6 +9,7 @@ struct ProcDetail: Sendable {
     var groups: [String] = []
     var ports: [PortRow] = []
     var systemProperties: [String] = [] // JVM system properties (Java processes only)
+    var classpath: [String] = []        // java.class.path entries, split out
     var elevated: Bool = false          // fetched via sudo
     var cwdDenied: Bool = false         // cwd unreadable without privileges
     var envDenied: Bool = false         // env unreadable without privileges
@@ -364,6 +365,23 @@ final class ProcessMonitor {
         return props.sorted()
     }
 
+    // Splits the java.class.path entry out of the system properties: returns its
+    // individual entries (separated by ':') and the remaining properties.
+    nonisolated static func extractClasspath(from props: [String]) -> (classpath: [String], remaining: [String]) {
+        let prefix = "java.class.path="
+        var classpath: [String] = []
+        var remaining: [String] = []
+        for p in props {
+            if p.hasPrefix(prefix) {
+                classpath = String(p.dropFirst(prefix.count))
+                    .split(separator: ":", omittingEmptySubsequences: true).map(String.init)
+            } else {
+                remaining.append(p)
+            }
+        }
+        return (classpath, remaining)
+    }
+
     nonisolated private static func firstUnescapedEquals(_ s: String) -> String.Index? {
         var idx = s.startIndex
         var escaped = false
@@ -465,7 +483,7 @@ final class ProcessMonitor {
         d.environment = await env
         d.groups = await groups
         d.ports = await ports
-        d.systemProperties = await sysProps
+        (d.classpath, d.systemProperties) = extractClasspath(from: await sysProps)
         d.cwdDenied = (d.workingDirectory == nil)
         d.envDenied = d.environment.isEmpty
         return d
@@ -518,7 +536,9 @@ final class ProcessMonitor {
         d.environment = extractEnvironment(command: d.command, full: full)
         d.envDenied = d.environment.isEmpty
         d.ports = PortRow.parse(section("PORTS"))
-        if rec.isJava { d.systemProperties = parseSystemProperties(section("SYSPROPS")) }
+        if rec.isJava {
+            (d.classpath, d.systemProperties) = extractClasspath(from: parseSystemProperties(section("SYSPROPS")))
+        }
         d.groups = await fetchGroups(uid: rec.uid)
         return d
     }

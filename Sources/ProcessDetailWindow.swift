@@ -16,12 +16,18 @@ struct ProcessDetailWindow: View {
         case environment = "Environment"
         case ports = "TCP Ports"
         case systemProperties = "System Properties"
+        case classpath = "Classpath"
         var id: String { rawValue }
     }
 
-    // Tabs to show for this process — System Properties only for JVM processes.
+    // Tabs to show for this process — System Properties / Classpath only for JVMs.
     private var tabs: [DetailTab] {
-        DetailTab.allCases.filter { $0 != .systemProperties || record.isJava }
+        DetailTab.allCases.filter { tab in
+            switch tab {
+            case .systemProperties, .classpath: return record.isJava
+            default: return true
+            }
+        }
     }
 
     @State private var detail = ProcDetail()
@@ -47,6 +53,8 @@ struct ProcessDetailWindow: View {
             return detail.systemProperties.isEmpty
                 ? "System properties unavailable — jcmd could not attach to this JVM (it may have exited, declined the attach, or belong to another user)."
                 : detail.systemProperties.joined(separator: "\n")
+        case .classpath:
+            return detail.classpath.joined(separator: "\n")
         }
     }
 
@@ -125,6 +133,9 @@ struct ProcessDetailWindow: View {
                 if selectedTab == .ports {
                     PortsTable(rows: detail.ports)
                         .clipShape(RoundedRectangle(cornerRadius: 6))
+                } else if selectedTab == .classpath {
+                    ClasspathList(entries: detail.classpath)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
                 } else {
                     ScrollView(.vertical) {
                         Text(shownText)
@@ -198,6 +209,7 @@ struct ProcessDetailWindow: View {
         case .environment: return detail.environment.isEmpty ? "Environment" : "Environment (\(detail.environment.count))"
         case .ports: return detail.ports.isEmpty ? "TCP Ports" : "TCP Ports (\(detail.ports.count))"
         case .systemProperties: return detail.systemProperties.isEmpty ? "System Properties" : "System Properties (\(detail.systemProperties.count))"
+        case .classpath: return detail.classpath.isEmpty ? "Classpath" : "Classpath (\(detail.classpath.count))"
         }
     }
 
@@ -220,6 +232,41 @@ struct ProcessDetailWindow: View {
                 killError = error.localizedDescription
                 showingKillError = true
             }
+        }
+    }
+}
+
+// Lists each java.class.path entry on its own row.
+struct ClasspathList: View {
+    let entries: [String]
+
+    private struct Entry: Identifiable { let id: Int; let path: String }
+
+    var body: some View {
+        if entries.isEmpty {
+            Text("No classpath entries (java.class.path is empty or unavailable).")
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(nsColor: .textBackgroundColor))
+        } else {
+            let rows = entries.enumerated().map { Entry(id: $0.offset, path: $0.element) }
+            Table(rows) {
+                TableColumn("#") { (e: Entry) in
+                    Text("\(e.id + 1)")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                .width(min: 32, ideal: 40, max: 56)
+
+                TableColumn("CLASSPATH ENTRY") { (e: Entry) in
+                    Text(e.path)
+                        .font(.system(.subheadline, design: .monospaced))
+                        .textSelection(.enabled)
+                        .lineLimit(1).truncationMode(.middle)
+                        .help(e.path)
+                }
+            }
+            .tableStyle(.inset)
         }
     }
 }
